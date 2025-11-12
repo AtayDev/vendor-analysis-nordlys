@@ -1,0 +1,5 @@
+{
+  "name": "Vendor Analysis Tool",
+  "description": "An industry-grade tool to analyze vendor documents (PDFs, images) and generate structured, multi-part summaries covering technical, operational, and financial data.",
+  "requestFramePermissions": []
+}
