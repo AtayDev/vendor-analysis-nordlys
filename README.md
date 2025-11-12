@@ -15,6 +15,13 @@ View your app in AI Studio: https://ai.studio/apps/drive/1KH5BnXSZH4oCqAj_aiEz9W
 
 1. Install dependencies:
    `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
+2. Copy [.env.example](.env.example) to `.env.local` and configure:
+   - `GEMINI_API_KEY` with your Gemini API key.
+   - `VITE_AUTH_SECRET` with a strong, random string used to sign login tokens.
+   - `TOKEN_TTL_DAYS` to control how long generated access tokens remain valid (defaults to 3 days).
+3. Generate a login token:
+   `npm run generate-token`
+
+   The script reads your `.env.local` configuration and prints a signed token along with its expiration timestamp. Pass `--days=<number>` to override the default lifespan for a single token.
+4. Share the generated token with authorized users and run the app:
    `npm run dev`

@@ -3,12 +3,19 @@ import { AppState, Report, PlanningReport } from './types';
 import { generateReport, generatePlan } from './services/geminiService';
 import { PROMPT_TEMPLATE, PLANNING_PROMPT_TEMPLATE } from './constants';
 import { fileToBase64 } from './utils/fileUtils';
-import { ScanLineIcon, RotateCcwIcon, UploadCloudIcon, FileUpIcon, FolderOpenIcon, Loader2Icon, ClipboardListIcon, TargetIcon, ArrowRightIcon, XCircleIcon } from './components/icons';
+import { ScanLineIcon, RotateCcwIcon, UploadCloudIcon, FileUpIcon, FolderOpenIcon, Loader2Icon, ClipboardListIcon, TargetIcon, ArrowRightIcon, XCircleIcon, ShieldCheckIcon } from './components/icons';
 import AnalysisWorkspace from './components/AnalysisWorkspace';
 import Modal from './components/Modal';
+import LoginGate from './components/LoginGate';
+import { validateToken, AUTH_TOKEN_STORAGE_KEY } from './utils/tokenAuth';
+
+type AuthStatus = 'checking' | 'authenticated' | 'unauthenticated';
 
 // Main Application Component
 const App: React.FC = () => {
+  const [authStatus, setAuthStatus] = useState<AuthStatus>('checking');
+  const [authError, setAuthError] = useState<string | null>(null);
+  const [isVerifyingToken, setIsVerifyingToken] = useState<boolean>(false);
   const [appState, setAppState] = useState<AppState>('upload');
   const [file, setFile] = useState<File | null>(null);
   const [filePreview, setFilePreview] = useState<string | null>(null);
@@ -18,6 +25,51 @@ const App: React.FC = () => {
   const [isPlanningReportModalVisible, setIsPlanningReportModalVisible] = useState<boolean>(false);
 
   useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    const secretConfigured = Boolean(import.meta.env.VITE_AUTH_SECRET);
+
+    if (!secretConfigured) {
+      console.error('VITE_AUTH_SECRET is not configured. Token login is disabled.');
+      setAuthError('Application secret is not configured.');
+      setAuthStatus('unauthenticated');
+      return;
+    }
+
+    const storedToken = window.localStorage.getItem(AUTH_TOKEN_STORAGE_KEY);
+
+    if (!storedToken) {
+      setAuthStatus('unauthenticated');
+      return;
+    }
+
+    setIsVerifyingToken(true);
+
+    validateToken(storedToken)
+      .then((result) => {
+        if (result.valid) {
+          setAuthStatus('authenticated');
+          setAuthError(null);
+        } else {
+          window.localStorage.removeItem(AUTH_TOKEN_STORAGE_KEY);
+          setAuthStatus('unauthenticated');
+          setAuthError(result.reason ?? 'Token validation failed.');
+        }
+      })
+      .catch((err) => {
+        console.error('Failed to validate stored token', err);
+        window.localStorage.removeItem(AUTH_TOKEN_STORAGE_KEY);
+        setAuthStatus('unauthenticated');
+        setAuthError('Token validation failed.');
+      })
+      .finally(() => {
+        setIsVerifyingToken(false);
+      });
+  }, []);
+
+  useEffect(() => {
     // Cleanup function to revoke the object URL when the component unmounts or the preview changes
     return () => {
         if (filePreview) {
@@ -25,6 +77,50 @@ const App: React.FC = () => {
         }
     };
   }, [filePreview]);
+
+  const handleLogout = useCallback(() => {
+    if (typeof window !== 'undefined') {
+      window.localStorage.removeItem(AUTH_TOKEN_STORAGE_KEY);
+    }
+    setAuthStatus('unauthenticated');
+    setAuthError(null);
+    setAppState('upload');
+    setFile(null);
+    setFilePreview(null);
+    setPlanningReport(null);
+    setReport(null);
+    setError(null);
+  }, []);
+
+  const handleTokenSubmit = useCallback(async (token: string) => {
+    if (isVerifyingToken) {
+      return;
+    }
+
+    setIsVerifyingToken(true);
+    setAuthError(null);
+
+    try {
+      const result = await validateToken(token);
+
+      if (result.valid) {
+        if (typeof window !== 'undefined') {
+          window.localStorage.setItem(AUTH_TOKEN_STORAGE_KEY, token);
+        }
+        setAuthStatus('authenticated');
+        setAuthError(null);
+      } else {
+        setAuthStatus('unauthenticated');
+        setAuthError(result.reason ?? 'Token validation failed.');
+      }
+    } catch (err) {
+      console.error('Token verification failed', err);
+      setAuthStatus('unauthenticated');
+      setAuthError('Token verification failed.');
+    } finally {
+      setIsVerifyingToken(false);
+    }
+  }, [isVerifyingToken]);
 
   const resetWorkflow = useCallback(() => {
     setAppState('upload');
@@ -127,12 +223,23 @@ const App: React.FC = () => {
     return 'w-full mx-auto max-w-6xl';
   };
 
+  if (authStatus !== 'authenticated') {
+    return (
+      <LoginGate
+        onSubmit={handleTokenSubmit}
+        isVerifying={isVerifyingToken || authStatus === 'checking'}
+        errorMessage={authError}
+      />
+    );
+  }
+
   return (
     <div className="app-shell flex h-screen overflow-hidden bg-[--color-bg]">
-      <Sidebar 
-        onReset={resetWorkflow} 
-        planningReport={planningReport} 
+      <Sidebar
+        onReset={resetWorkflow}
+        planningReport={planningReport}
         onShowPlanningReport={() => setIsPlanningReportModalVisible(true)}
+        onLogout={handleLogout}
       />
       <main id="main-content" className="flex-1 custom-scrollbar p-10 overflow-y-auto">
         <div className={`transition-all duration-300 ease-in-out ${getContainerClasses()}`}>
@@ -149,7 +256,7 @@ const App: React.FC = () => {
 
 // --- Sub-components for different states ---
 
-const Sidebar: React.FC<{ onReset: () => void; planningReport: PlanningReport | null; onShowPlanningReport: () => void; }> = ({ onReset, planningReport, onShowPlanningReport }) => (
+const Sidebar: React.FC<{ onReset: () => void; planningReport: PlanningReport | null; onShowPlanningReport: () => void; onLogout: () => void; }> = ({ onReset, planningReport, onShowPlanningReport, onLogout }) => (
     <aside id="sidebar" className="w-[22rem] bg-[--color-panel] border-r border-[--color-border] flex flex-col p-6 flex-shrink-0">
         <div className="flex items-center text-xl font-bold mb-8 text-[--color-text] border-b border-[--color-border] pb-4">
             <ScanLineIcon className="w-8 h-8 mr-3 text-[--color-active-pill]" />
@@ -171,9 +278,13 @@ const Sidebar: React.FC<{ onReset: () => void; planningReport: PlanningReport | 
             )}
         </nav>
         <div className="flex-grow"></div>
-        <button onClick={onReset} className="w-full flex items-center justify-center gap-2 text-sm font-medium text-[--color-text-muted] p-3 rounded-lg hover:bg-[--color-accent-hover] mb-4">
+        <button onClick={onReset} className="w-full flex items-center justify-center gap-2 text-sm font-medium text-[--color-text-muted] p-3 rounded-lg hover:bg-[--color-accent-hover] mb-2">
             <RotateCcwIcon className="w-4 h-4" />
             Start New Analysis
+        </button>
+        <button onClick={onLogout} className="w-full flex items-center justify-center gap-2 text-sm font-medium text-[--color-text-muted] p-3 rounded-lg hover:bg-[--color-accent-hover] mb-4">
+            <ShieldCheckIcon className="w-4 h-4" />
+            Log Out
         </button>
         <div className="text-xs text-[--color-text-muted] text-center border-t border-[--color-border] pt-4 mt-auto">
             v3.5 (Final Layout)
